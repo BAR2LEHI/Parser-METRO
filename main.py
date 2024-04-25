@@ -1,3 +1,4 @@
+import csv
 import time
 
 from bs4 import BeautifulSoup
@@ -12,8 +13,8 @@ headers = {
 }
 
 METRO_URL = 'https://online.metro-cc.ru'
-CATEGORY = 'Рыба, икра, морепродукты'
-SUBCATEGORY = 'Живая и свежая рыба'
+CATEGORY = 'Хлеб, выпечка, торты'
+SUBCATEGORY = 'Хлеб, лаваш, лепешки'
 
 
 def get_source_category_html(driver, url, category, subcategory):
@@ -49,13 +50,19 @@ def get_products_urls(page_source):
 
 
 def get_products_data(driver, main_url, products_urls):
-
+    products_data = []
     for url in products_urls:
         try:
             product_full_url = main_url + url
             driver.switch_to.new_window('tab')
             driver.get(product_full_url)
             soup = BeautifulSoup(driver.page_source, 'lxml')
+
+            check_availability = soup.find('div', class_='product-page-content__prices-block').find('p')
+            if check_availability is not None:
+                available = check_availability.text.strip()
+                if available == 'Раскупили':
+                    continue
 
             try:
                 product_article = soup.find(
@@ -92,7 +99,6 @@ def get_products_data(driver, main_url, products_urls):
                 penny_price_elem = div_prices.find(
                     'span', class_='product-price__sum-penny'
                 )
-                
                 if penny_price_elem is not None:
                     actual_price = ''.join((rubles_price_elem.text + penny_price_elem.text).split('\xa0'))
                 else:
@@ -114,24 +120,32 @@ def get_products_data(driver, main_url, products_urls):
                     old_price = ''.join((old_rubles_price_elem.text + old_penny_price_elem.text).split('\xa0'))
                 else:
                     old_price = ''.join(old_rubles_price_elem.text.split('\xa0'))
-                
             except Exception as ex:
                 old_price = None
                 
-            product = {
+            products_data.append({
                 'id': product_article,
                 'name': product_name,
                 'brand': brand,
+                'link': product_full_url,
                 'actual_price': actual_price,
                 'old_price': old_price
-            }
-            print(product)
-
+            })
         finally:
             driver.close()
             main_page = driver.window_handles[0]  
             driver.switch_to.window(main_page)
+    return products_data
 
+
+def products_data_to_csv(products_data, subcategory):
+    with open(f'./data/{subcategory}.csv', 'w+', newline='', encoding='utf-8') as csvfile:
+        fieldnames = ['id', 'name', 'brand', 'link', 'actual_price', 'old_price']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
+        writer.writeheader()
+        for product in products_data:
+            writer.writerow(product)
+       
 
 def main(driver):
     page_source = get_source_category_html(
@@ -141,10 +155,14 @@ def main(driver):
         subcategory=SUBCATEGORY
     )
     products_urls = get_products_urls(page_source)
-    get_products_data(
+    products_data = get_products_data(
         main_url=METRO_URL,
         products_urls=products_urls,
         driver=driver
+    )
+    products_data_to_csv(
+        products_data=products_data,
+        subcategory=SUBCATEGORY  
     )
 
 
